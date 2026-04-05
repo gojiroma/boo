@@ -137,7 +137,7 @@
         // UTF-8文字列をBase64に変換
         function utf8_to_b64(str) {
             return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (match, p1) {
-                return String.fromCharCode('0x' + p1);
+                return String.fromCharCode(parseInt(p1, 16));
             }));
         }
 
@@ -167,7 +167,11 @@
                 const newEntry = `${title}\t${url}\n`;
 
                 // 新しいエントリを追加
-                const updatedContent = currentContent + newEntry;
+                let updatedContent = currentContent;
+                if (!currentContent.endsWith('\n')) {
+                    updatedContent += '\n';
+                }
+                updatedContent += newEntry;
                 const encodedContent = utf8_to_b64(updatedContent);
 
                 // ファイルを更新
@@ -233,7 +237,7 @@
                 lines.forEach(line => {
                     if (line.trim() === '') return;
                     const [title, url] = line.split('\t');
-                    const asin = url.split('asin=')[1];
+                    const asin = url.split('asin=')[1] || url.split('dp/')[1];
                     books.push({
                         summary: { title },
                         inputCode: asin,
