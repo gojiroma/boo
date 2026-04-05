@@ -71,7 +71,7 @@
 </head>
 
 <body>
-    <input type="text" id="janCode" autocomplete="off" placeholder="JANコードを入力">
+    <input type="text" id="janCode" autocomplete="off" placeholder="JANコードまたはタイトルを入力">
     <div id="bookList"></div>
 
     <!-- GitHubトークン入力フィールド -->
@@ -244,7 +244,7 @@
         let debounceTimer;
         document.getElementById('janCode').addEventListener('input', () => {
             clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(fetchBookInfo, 1000);
+            debounceTimer = setTimeout(filterBooks, 500);
         });
 
         // GitHubトークン入力フィールドの入力が落ち着いたら自動で保存
@@ -278,39 +278,56 @@
             shuffledBooks.forEach(book => displayBookInfo(book, false));
         }
 
+        // 書籍情報を取得
         async function fetchBookInfo() {
             const inputCode = document.getElementById('janCode').value.trim();
             if (!inputCode) return;
 
-            // APIリクエスト用にISBN-10をISBN-13に変換
-            const isbnForApi = inputCode.length === 10 ? convertISBN10toISBN13(inputCode) : inputCode;
+            // 数字のみの場合はISBNとして扱う
+            if (/^\d+$/.test(inputCode)) {
+                const isbnForApi = inputCode.length === 10 ? convertISBN10toISBN13(inputCode) : inputCode;
+                const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbnForApi}&pretty`;
 
-            // OpenBD APIを使用
-            const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbnForApi}&pretty`;
+                try {
+                    const response = await fetch(apiUrl);
+                    const data = await response.json();
 
-            try {
-                const response = await fetch(apiUrl);
-                const data = await response.json();
+                    if (data && data.length > 0) {
+                        const bookData = data[0];
+                        bookData.inputCode = inputCode;
 
-                if (data && data.length > 0) {
-                    const bookData = data[0];
-                    bookData.inputCode = inputCode;
-
-                    displayBookInfo(bookData, true);
-                    const success = await updateTSVOnGitHub(bookData.summary.title, bookData.url || `https://www.amazon.co.jp/dp/${bookData.inputCode}`);
-                    if (!success) {
-                        speakText('GitHubトークンが必要です。');
+                        displayBookInfo(bookData, true);
+                        const success = await updateTSVOnGitHub(bookData.summary.title, bookData.url || `https://www.amazon.co.jp/dp/${bookData.inputCode}`);
+                        if (!success) {
+                            speakText('GitHubトークンが必要です。');
+                        }
+                    } else {
+                        speakText('書籍情報が見つかりませんでした。');
                     }
-                } else {
-                    speakText('書籍情報が見つかりませんでした。');
+                } catch (error) {
+                    console.error('エラー:', error);
+                    speakText('書籍情報の取得中にエラーが発生しました。');
                 }
-            } catch (error) {
-                console.error('エラー:', error);
-                speakText('書籍情報の取得中にエラーが発生しました。');
             }
 
             // 入力フィールドをクリア
             document.getElementById('janCode').value = '';
+        }
+
+        // 書籍情報をフィルタリングして表示
+        function filterBooks() {
+            const input = document.getElementById('janCode').value.trim().toLowerCase();
+            const bookList = document.getElementById('bookList');
+            const books = Array.from(bookList.children);
+
+            books.forEach(book => {
+                const title = book.querySelector('h3').textContent.toLowerCase();
+                if (title.includes(input)) {
+                    book.style.display = 'flex';
+                } else {
+                    book.style.display = 'none';
+                }
+            });
         }
 
         function displayBookInfo(bookData, shouldSpeak = false) {
