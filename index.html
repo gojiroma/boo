@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JANコード書籍情報ツール</title>
+    <style>
+        body {
+            font-family: 'Hiragino Mincho Pro', 'MS Mincho', serif;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        #janCode {
+            width: 200px;
+            padding: 8px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            border: none;
+        }
+
+        #bookList {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: flex-end;
+            min-height: 300px;
+        }
+
+        .bookItem {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            padding: 6px;
+            border-radius: 3px;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .bookItem h3 {
+            margin: 0;
+            font-size: 16px;
+            word-break: break-all;
+        }
+
+        input {
+            outline: none;
+        }
+    </style>
+</head>
+
+<body>
+    <input type="text" id="janCode" autocomplete="off">
+    <div id="bookList"></div>
+
+    <script>
+        // テキストを読み上げる関数
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                speechSynthesis.speak(utterance);
+            }
+        }
+
+        // ISBN-10をISBN-13に変換する関数（APIリクエスト用）
+        function convertISBN10toISBN13(isbn10) {
+            if (isbn10.length !== 10) return isbn10;
+
+            const prefix = '978';
+            const isbn12 = prefix + isbn10.substring(0, 9);
+            let sum = 0;
+
+            for (let i = 0; i < isbn12.length; i++) {
+                const digit = parseInt(isbn12[i], 10);
+                sum += (i % 2 === 0) ? digit : digit * 3;
+            }
+
+            const checkDigit = (10 - (sum % 10)) % 10;
+            return isbn12 + checkDigit;
+        }
+
+        // ランダムな色を生成
+        function getRandomColor() {
+            const letters = '0123456789ABCDEF';
+            let color = '#';
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        // ランダムな高さを生成
+        function getRandomHeight() {
+            return Math.floor(Math.random() * 100) + 150;
+        }
+
+        // タイトルの長さに応じて幅を計算
+        function calculateWidth(title) {
+            const baseWidth = 22; // 基本の幅
+            const additionalWidth = Math.min(title.length * 2, 100); // 1文字あたり2px追加（最大100px）
+            return baseWidth + additionalWidth;
+        }
+
+        // 配列をシャッフルする関数
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        // 入力が落ち着いたら自動で書籍情報を取得
+        let debounceTimer;
+        document.getElementById('janCode').addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(fetchBookInfo, 1000);
+        });
+
+        // ページ読み込み時にLocalStorageとTSVから書籍情報を復元
+        document.addEventListener('DOMContentLoaded', async () => {
+            const savedBooks = JSON.parse(localStorage.getItem('books')) || [];
+            const tsvBooks = await fetchAndParseTSVBooks();
+            const allBooks = [...savedBooks, ...tsvBooks];
+            shuffleAndDisplayBooks(allBooks);
+            setInterval(() => shuffleAndDisplayBooks(allBooks), 180000); // 3分ごとにシャッフル
+        });
+
+        // TSVファイルをfetchしてパースして書籍情報を取得
+        async function fetchAndParseTSVBooks() {
+            try {
+                const response = await fetch('books.tsv');
+                const tsvData = await response.text();
+                const books = [];
+                const lines = tsvData.split('\n');
+                lines.forEach(line => {
+                    if (line.trim() === '') return;
+                    const [title, url] = line.split('\t');
+                    const asin = url.split('asin=')[1];
+                    books.push({
+                        summary: { title },
+                        inputCode: asin,
+                        url
+                    });
+                });
+                return books;
+            } catch (error) {
+                console.error('TSVファイルの読み込み中にエラーが発生しました:', error);
+                return [];
+            }
+        }
+
+        // 書籍情報をシャッフルして表示
+        function shuffleAndDisplayBooks(books) {
+            const bookList = document.getElementById('bookList');
+            bookList.innerHTML = '';
+            const shuffledBooks = shuffleArray(books);
+            shuffledBooks.forEach(book => displayBookInfo(book, false));
+        }
+
+        async function fetchBookInfo() {
+            const inputCode = document.getElementById('janCode').value.trim();
+            if (!inputCode) return;
+
+            // APIリクエスト用にISBN-10をISBN-13に変換
+            const isbnForApi = inputCode.length === 10 ? convertISBN10toISBN13(inputCode) : inputCode;
+
+            // OpenBD APIを使用
+            const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbnForApi}&pretty`;
+
+            try {
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+
+                if (data && data.length > 0) {
+                    const bookData = data[0];
+                    bookData.inputCode = inputCode;
+
+                    const savedBooks = JSON.parse(localStorage.getItem('books')) || [];
+                    const existingBook = savedBooks.find(book => book.inputCode === inputCode);
+
+                    if (existingBook) {
+                        // タイトルを読み上げる
+                        const title = bookData.summary.title || 'タイトル不明';
+                        speakText(title);
+                    } else {
+                        displayBookInfo(bookData, true);
+
+                        savedBooks.push(bookData);
+                        localStorage.setItem('books', JSON.stringify(savedBooks));
+                    }
+                } else {
+                    speakText('書籍情報が見つかりませんでした。');
+                }
+            } catch (error) {
+                console.error('エラー:', error);
+                speakText('書籍情報の取得中にエラーが発生しました。');
+            }
+
+            // 入力フィールドをクリア
+            document.getElementById('janCode').value = '';
+        }
+
+        function displayBookInfo(bookData, shouldSpeak = false) {
+            const bookList = document.getElementById('bookList');
+            const bookItem = document.createElement('a');
+            bookItem.className = 'bookItem';
+
+            // タイトル
+            const title = bookData.summary.title || 'タイトル不明';
+            // Amazonリンク
+            const amazonUrl = bookData.url || `https://www.amazon.co.jp/dp/${bookData.inputCode}`;
+
+            bookItem.href = amazonUrl;
+            bookItem.target = '_blank';
+            bookItem.style.backgroundColor = getRandomColor();
+            bookItem.style.height = `${getRandomHeight()}px`;
+            bookItem.style.width = `${calculateWidth(title)}px`;
+
+            bookItem.innerHTML = `
+                <h3>${title}</h3>
+            `;
+
+            // ミドルクリックで削除
+            bookItem.addEventListener('auxclick', (e) => {
+                if (e.button === 1) { // ミドルクリック
+                    e.preventDefault();
+                    bookItem.remove();
+
+                    // LocalStorageからも削除
+                    const savedBooks = JSON.parse(localStorage.getItem('books')) || [];
+                    const updatedBooks = savedBooks.filter(book => book.inputCode !== bookData.inputCode);
+                    localStorage.setItem('books', JSON.stringify(updatedBooks));
+                }
+            });
+
+            bookList.appendChild(bookItem);
+
+            // タイトルを読み上げる
+            if (shouldSpeak) {
+                speakText(title);
+            }
+        }
+
+        document.getElementsByTagName('input')[0].focus();
+    </script>
+</body>
+
+</html>
