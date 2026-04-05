@@ -141,59 +141,7 @@
             }));
         }
 
-        // GitHub APIを使用してTSVファイルを更新
-        async function updateTSVOnGitHub(title, url) {
-            const token = localStorage.getItem('github-bookToken');
-            if (!token) {
-                document.getElementById('githubTokenInput').style.display = 'block';
-                return false;
-            }
 
-            const username = 'gojiroma';
-            const repo = 'bookmarks';
-            const path = 'books.tsv';
-            const apiUrl = `https://api.github.com/repos/${username}/${repo}/contents/${path}`;
-
-            try {
-                // ファイルの現在のSHAを取得
-                const response = await fetch(apiUrl, {
-                    headers: {
-                        'Authorization': `token ${token}`
-                    }
-                });
-
-                const fileData = await response.json();
-                const currentContent = atob(fileData.content);
-                const newEntry = `${title}\t${url}\n`;
-
-                // 新しいエントリを追加
-                let updatedContent = currentContent;
-                if (!currentContent.endsWith('\n')) {
-                    updatedContent += '\n';
-                }
-                updatedContent += newEntry;
-                const encodedContent = utf8_to_b64(updatedContent);
-
-                // ファイルを更新
-                await fetch(apiUrl, {
-                    method: 'PUT',
-                    headers: {
-                        'Authorization': `token ${token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        message: `Add book: ${title}`,
-                        content: encodedContent,
-                        sha: fileData.sha
-                    })
-                });
-                return true;
-            } catch (error) {
-                console.error('GitHub APIエラー:', error);
-                speakText('GitHubへの保存中にエラーが発生しました。');
-                return false;
-            }
-        }
         // トークンを保存
         function saveToken(token) {
             if (token) {
@@ -218,38 +166,103 @@
                 return null;
             }
         }
+            // GitHub APIを使用してTSVファイルを更新
+            async function updateTSVOnGitHub(title, url) {
+                const token = localStorage.getItem('github-bookToken');
+                if (!token) {
+                    document.getElementById('githubTokenInput').style.display = 'block';
+                    return false;
+                }
 
-        // 最新コミットのハッシュを使ってbooks.tsvをfetch
-        async function fetchBooksFromLatestCommit() {
-            const commitHash = await fetchLatestCommitHash();
-            if (!commitHash) {
-                console.error('コミットハッシュの取得に失敗しました。');
-                return [];
-            }
+                const username = 'gojiroma';
+                const repo = 'bookmarks';
+                const path = 'books.tsv';
+                const apiUrl = `https://api.github.com/repos/${username}/${repo}/contents/${path}`;
 
-            const fileUrl = `https://raw.githubusercontent.com/gojiroma/bookmarks/${commitHash}/books.tsv`;
-            try {
-                const response = await fetch(fileUrl);
-                const tsvData = await response.text();
-                const books = [];
-                const lines = tsvData.split('\n');
-                lines.forEach(line => {
-                    if (line.trim() === '') return;
-                    const [title, url] = line.split('\t');
-                    const asin = url.split('asin=')[1] || url.split('dp/')[1];
-                    books.push({
-                        summary: { title },
-                        inputCode: asin,
-                        url
+                try {
+                    // ファイルの現在のSHAを取得
+                    const response = await fetch(apiUrl, {
+                        headers: {
+                            'Authorization': `token ${token}`
+                        }
                     });
-                });
-                return books;
-            } catch (error) {
-                console.error('TSVファイルの読み込みに失敗しました:', error);
-                return [];
-            }
-        }
 
+                    const fileData = await response.json();
+                    const currentContent = decodeURIComponent(escape(atob(fileData.content)));
+                    const newEntry = `${title}\t${url}\n`;
+
+                    // 新しいエントリを追加
+                    let updatedContent = currentContent;
+                    if (!currentContent.endsWith('\n')) {
+                        updatedContent += '\n';
+                    }
+                    updatedContent += newEntry;
+                    const encodedContent = btoa(unescape(encodeURIComponent(updatedContent)));
+
+                    // ファイルを更新
+                    await fetch(apiUrl, {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `token ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            message: `Add book: ${title}`,
+                            content: encodedContent,
+                            sha: fileData.sha
+                        })
+                    });
+                    return true;
+                } catch (error) {
+                    console.error('GitHub APIエラー:', error);
+                    speakText('GitHubへの保存中にエラーが発生しました。');
+                    return false;
+                }
+            }
+
+            // 最新コミットのハッシュを使ってbooks.tsvをfetch
+            async function fetchBooksFromLatestCommit() {
+                const commitHash = await fetchLatestCommitHash();
+                if (!commitHash) {
+                    console.error('コミットハッシュの取得に失敗しました。');
+                    return [];
+                }
+
+                const apiUrl = `https://api.github.com/repos/gojiroma/bookmarks/git/trees/${commitHash}?recursive=1`;
+                try {
+                    const response = await fetch(apiUrl, {
+                        headers: {
+                            'Accept': 'application/vnd.github.v3+json'
+                        }
+                    });
+                    const data = await response.json();
+                    const tsvFile = data.tree.find(file => file.path === 'books.tsv');
+                    if (!tsvFile) {
+                        console.error('books.tsvが見つかりません。');
+                        return [];
+                    }
+
+                    const contentResponse = await fetch(`https://api.github.com/repos/gojiroma/bookmarks/git/blobs/${tsvFile.sha}`);
+                    const contentData = await contentResponse.json();
+                    const tsvData = decodeURIComponent(escape(atob(contentData.content)));
+                    const books = [];
+                    const lines = tsvData.split('\n');
+                    lines.forEach(line => {
+                        if (line.trim() === '') return;
+                        const [title, url] = line.split('\t');
+                        const asin = url.split('asin=')[1] || url.split('dp/')[1];
+                        books.push({
+                            summary: { title },
+                            inputCode: asin,
+                            url
+                        });
+                    });
+                    return books;
+                } catch (error) {
+                    console.error('TSVファイルの読み込みに失敗しました:', error);
+                    return [];
+                }
+            }
         // ISBNの入力が数字のみの場合は自動で書籍情報を取得
         document.getElementById('janCode').addEventListener('input', async (e) => {
             const inputCode = e.target.value.trim();
@@ -282,6 +295,7 @@
 
                 // 入力フィールドをクリア
                 e.target.value = '';
+                filterBooks(); // 絞り込みを解除
             }
         });
 
