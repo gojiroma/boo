@@ -134,6 +134,13 @@
             return array;
         }
 
+        // UTF-8文字列をBase64に変換
+        function utf8_to_b64(str) {
+            return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function (match, p1) {
+                return String.fromCharCode('0x' + p1);
+            }));
+        }
+
         // GitHub APIを使用してTSVファイルを更新
         async function updateTSVOnGitHub(title, url) {
             const token = localStorage.getItem('github-bookToken');
@@ -161,7 +168,7 @@
 
                 // 新しいエントリを追加
                 const updatedContent = currentContent + newEntry;
-                const encodedContent = btoa(updatedContent);
+                const encodedContent = utf8_to_b64(updatedContent);
 
                 // ファイルを更新
                 await fetch(apiUrl, {
@@ -240,50 +247,11 @@
             }
         }
 
-        // 入力が落ち着いたら自動で書籍情報を取得
-        let debounceTimer;
-        document.getElementById('janCode').addEventListener('input', () => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(filterBooks, 500);
-        });
-
-        // GitHubトークン入力フィールドの入力が落ち着いたら自動で保存
-        document.getElementById('githubTokenInput').addEventListener('input', () => {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                const token = document.getElementById('githubTokenInput').value.trim();
-                if (token) {
-                    saveToken(token);
-                }
-            }, 1000);
-        });
-
-        // ページ読み込み時に最新のbooks.tsvから書籍情報を復元
-        document.addEventListener('DOMContentLoaded', async () => {
-            const tsvBooks = await fetchBooksFromLatestCommit();
-            shuffleAndDisplayBooks(tsvBooks);
-            setInterval(() => shuffleAndDisplayBooks(tsvBooks), 180000); // 3分ごとにシャッフル
-
-            // GitHubトークンがなければ入力フィールドを表示
-            if (!localStorage.getItem('github-bookToken')) {
-                document.getElementById('githubTokenInput').style.display = 'block';
-            }
-        });
-
-        // 書籍情報をシャッフルして表示
-        function shuffleAndDisplayBooks(books) {
-            const bookList = document.getElementById('bookList');
-            bookList.innerHTML = '';
-            const shuffledBooks = shuffleArray(books);
-            shuffledBooks.forEach(book => displayBookInfo(book, false));
-        }
-
-        // 書籍情報を取得
-        async function fetchBookInfo() {
-            const inputCode = document.getElementById('janCode').value.trim();
+        // ISBNの入力が数字のみの場合は自動で書籍情報を取得
+        document.getElementById('janCode').addEventListener('input', async (e) => {
+            const inputCode = e.target.value.trim();
             if (!inputCode) return;
 
-            // 数字のみの場合はISBNとして扱う
             if (/^\d+$/.test(inputCode)) {
                 const isbnForApi = inputCode.length === 10 ? convertISBN10toISBN13(inputCode) : inputCode;
                 const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbnForApi}&pretty`;
@@ -308,10 +276,46 @@
                     console.error('エラー:', error);
                     speakText('書籍情報の取得中にエラーが発生しました。');
                 }
-            }
 
-            // 入力フィールドをクリア
-            document.getElementById('janCode').value = '';
+                // 入力フィールドをクリア
+                e.target.value = '';
+            }
+        });
+
+        // GitHubトークン入力フィールドの入力が落ち着いたら自動で保存
+        document.getElementById('githubTokenInput').addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                const token = document.getElementById('githubTokenInput').value.trim();
+                if (token) {
+                    saveToken(token);
+                }
+            }, 1000);
+        });
+
+        // 入力フィールドの変更を即座にフィルタリングに反映
+        document.getElementById('janCode').addEventListener('input', () => {
+            filterBooks();
+        });
+
+        // ページ読み込み時に最新のbooks.tsvから書籍情報を復元
+        document.addEventListener('DOMContentLoaded', async () => {
+            const tsvBooks = await fetchBooksFromLatestCommit();
+            shuffleAndDisplayBooks(tsvBooks);
+            setInterval(() => shuffleAndDisplayBooks(tsvBooks), 180000); // 3分ごとにシャッフル
+
+            // GitHubトークンがなければ入力フィールドを表示
+            if (!localStorage.getItem('github-bookToken')) {
+                document.getElementById('githubTokenInput').style.display = 'block';
+            }
+        });
+
+        // 書籍情報をシャッフルして表示
+        function shuffleAndDisplayBooks(books) {
+            const bookList = document.getElementById('bookList');
+            bookList.innerHTML = '';
+            const shuffledBooks = shuffleArray(books);
+            shuffledBooks.forEach(book => displayBookInfo(book, false));
         }
 
         // 書籍情報をフィルタリングして表示
