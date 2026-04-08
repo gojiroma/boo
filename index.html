@@ -166,139 +166,142 @@
                 return null;
             }
         }
-            // GitHub APIを使用してTSVファイルを更新
-            async function updateTSVOnGitHub(title, url) {
-                const token = localStorage.getItem('github-bookToken');
-                if (!token) {
-                    document.getElementById('githubTokenInput').style.display = 'block';
-                    return false;
-                }
-
-                const username = 'gojiroma';
-                const repo = 'bookmarks';
-                const path = 'books.tsv';
-                const apiUrl = `https://api.github.com/repos/${username}/${repo}/contents/${path}`;
-
-                try {
-                    // ファイルの現在のSHAを取得
-                    const response = await fetch(apiUrl, {
-                        headers: {
-                            'Authorization': `token ${token}`
-                        }
-                    });
-
-                    const fileData = await response.json();
-                    const currentContent = decodeURIComponent(escape(atob(fileData.content)));
-                    const newEntry = `${title}\t${url}\n`;
-
-                    // 新しいエントリを追加
-                    let updatedContent = currentContent;
-                    if (!currentContent.endsWith('\n')) {
-                        updatedContent += '\n';
-                    }
-                    updatedContent += newEntry;
-                    const encodedContent = btoa(unescape(encodeURIComponent(updatedContent)));
-
-                    // ファイルを更新
-                    await fetch(apiUrl, {
-                        method: 'PUT',
-                        headers: {
-                            'Authorization': `token ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            message: `Add book: ${title}`,
-                            content: encodedContent,
-                            sha: fileData.sha
-                        })
-                    });
-                    return true;
-                } catch (error) {
-                    console.error('GitHub APIエラー:', error);
-                    speakText('GitHubへの保存中にエラーが発生しました。');
-                    return false;
-                }
+        // GitHub APIを使用してTSVファイルを更新
+        async function updateTSVOnGitHub(title, url) {
+            const token = localStorage.getItem('github-bookToken');
+            if (!token) {
+                document.getElementById('githubTokenInput').style.display = 'block';
+                return false;
             }
 
-            // 最新コミットのハッシュを使ってbooks.tsvをfetch
-            async function fetchBooksFromLatestCommit() {
-                const commitHash = await fetchLatestCommitHash();
-                if (!commitHash) {
-                    console.error('コミットハッシュの取得に失敗しました。');
+            const username = 'gojiroma';
+            const repo = 'bookmarks';
+            const path = 'books.tsv';
+            const apiUrl = `https://api.github.com/repos/${username}/${repo}/contents/${path}`;
+
+            try {
+                // ファイルの現在のSHAを取得
+                const response = await fetch(apiUrl, {
+                    headers: {
+                        'Authorization': `token ${token}`
+                    }
+                });
+
+                const fileData = await response.json();
+                const currentContent = decodeURIComponent(escape(atob(fileData.content)));
+                const newEntry = `${title}\t${url}\n`;
+
+                // 新しいエントリを追加
+                let updatedContent = currentContent;
+                if (!currentContent.endsWith('\n')) {
+                    updatedContent += '\n';
+                }
+                updatedContent += newEntry;
+                const encodedContent = btoa(unescape(encodeURIComponent(updatedContent)));
+
+                // ファイルを更新
+                await fetch(apiUrl, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `token ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: `Add book: ${title}`,
+                        content: encodedContent,
+                        sha: fileData.sha
+                    })
+                });
+                return true;
+            } catch (error) {
+                console.error('GitHub APIエラー:', error);
+                speakText('GitHubへの保存中にエラーが発生しました。');
+                return false;
+            }
+        }
+
+        // 最新コミットのハッシュを使ってbooks.tsvをfetch
+        async function fetchBooksFromLatestCommit() {
+            const commitHash = await fetchLatestCommitHash();
+            if (!commitHash) {
+                console.error('コミットハッシュの取得に失敗しました。');
+                return [];
+            }
+
+            const apiUrl = `https://api.github.com/repos/gojiroma/bookmarks/git/trees/${commitHash}?recursive=1`;
+            try {
+                const response = await fetch(apiUrl, {
+                    headers: {
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                const data = await response.json();
+                const tsvFile = data.tree.find(file => file.path === 'books.tsv');
+                if (!tsvFile) {
+                    console.error('books.tsvが見つかりません。');
                     return [];
                 }
 
-                const apiUrl = `https://api.github.com/repos/gojiroma/bookmarks/git/trees/${commitHash}?recursive=1`;
-                try {
-                    const response = await fetch(apiUrl, {
-                        headers: {
-                            'Accept': 'application/vnd.github.v3+json'
-                        }
+                const contentResponse = await fetch(`https://api.github.com/repos/gojiroma/bookmarks/git/blobs/${tsvFile.sha}`);
+                const contentData = await contentResponse.json();
+                const tsvData = decodeURIComponent(escape(atob(contentData.content)));
+                const books = [];
+                const lines = tsvData.split('\n');
+                lines.forEach(line => {
+                    if (line.trim() === '') return;
+                    const [title, url] = line.split('\t');
+                    const asin = url.split('asin=')[1] || url.split('dp/')[1];
+                    books.push({
+                        summary: { title },
+                        inputCode: asin,
+                        url
                     });
-                    const data = await response.json();
-                    const tsvFile = data.tree.find(file => file.path === 'books.tsv');
-                    if (!tsvFile) {
-                        console.error('books.tsvが見つかりません。');
-                        return [];
-                    }
-
-                    const contentResponse = await fetch(`https://api.github.com/repos/gojiroma/bookmarks/git/blobs/${tsvFile.sha}`);
-                    const contentData = await contentResponse.json();
-                    const tsvData = decodeURIComponent(escape(atob(contentData.content)));
-                    const books = [];
-                    const lines = tsvData.split('\n');
-                    lines.forEach(line => {
-                        if (line.trim() === '') return;
-                        const [title, url] = line.split('\t');
-                        const asin = url.split('asin=')[1] || url.split('dp/')[1];
-                        books.push({
-                            summary: { title },
-                            inputCode: asin,
-                            url
-                        });
-                    });
-                    return books;
-                } catch (error) {
-                    console.error('TSVファイルの読み込みに失敗しました:', error);
-                    return [];
-                }
+                });
+                return books;
+            } catch (error) {
+                console.error('TSVファイルの読み込みに失敗しました:', error);
+                return [];
             }
+        }
         // ISBNの入力が数字のみの場合は自動で書籍情報を取得
         document.getElementById('janCode').addEventListener('input', async (e) => {
-            const inputCode = e.target.value.trim();
-            if (!inputCode) return;
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(async () => {
+                const inputCode = e.target.value.trim();
+                if (!inputCode) return;
 
-            if (/^\d+$/.test(inputCode)) {
-                const isbnForApi = inputCode.length === 10 ? convertISBN10toISBN13(inputCode) : inputCode;
-                const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbnForApi}&pretty`;
+                if (/^\d+$/.test(inputCode)) {
+                    const isbnForApi = inputCode.length === 10 ? convertISBN10toISBN13(inputCode) : inputCode;
+                    const apiUrl = `https://api.openbd.jp/v1/get?isbn=${isbnForApi}&pretty`;
 
-                try {
-                    const response = await fetch(apiUrl);
-                    const data = await response.json();
+                    try {
+                        const response = await fetch(apiUrl);
+                        const data = await response.json();
 
-                    if (data && data.length > 0) {
-                        const bookData = data[0];
-                        bookData.inputCode = inputCode;
+                        if (data && data.length > 0) {
+                            const bookData = data[0];
+                            bookData.inputCode = inputCode;
 
-                        displayBookInfo(bookData, true);
-                        const success = await updateTSVOnGitHub(bookData.summary.title, bookData.url || `https://www.amazon.co.jp/dp/${bookData.inputCode}`);
-                        if (!success) {
-                            speakText('GitHubトークンが必要です。');
+                            displayBookInfo(bookData, true);
+                            const success = await updateTSVOnGitHub(bookData.summary.title, bookData.url || `https://www.amazon.co.jp/dp/${bookData.inputCode}`);
+                            if (!success) {
+                                speakText('GitHubトークンが必要です。');
+                            }
+                        } else {
+                            speakText('書籍情報が見つかりませんでした。');
                         }
-                    } else {
-                        speakText('書籍情報が見つかりませんでした。');
+                    } catch (error) {
+                        console.error('エラー:', error);
+                        speakText('書籍情報の取得中にエラーが発生しました。');
                     }
-                } catch (error) {
-                    console.error('エラー:', error);
-                    speakText('書籍情報の取得中にエラーが発生しました。');
+
+                    // 入力フィールドをクリア
+                    e.target.value = '';
+                    filterBooks(); // 絞り込みを解除
                 }
-
-                // 入力フィールドをクリア
-                e.target.value = '';
-                filterBooks(); // 絞り込みを解除
-            }
+            }, 500); // 500msのdebounce
         });
-
+        let debounceTimer;
         // GitHubトークン入力フィールドの入力が落ち着いたら自動で保存
         document.getElementById('githubTokenInput').addEventListener('input', () => {
             clearTimeout(debounceTimer);
@@ -350,7 +353,7 @@
                 }
             });
         }
-
+        // 書籍情報を表示する関数
         function displayBookInfo(bookData, shouldSpeak = false) {
             const bookList = document.getElementById('bookList');
             const bookItem = document.createElement('a');
@@ -359,7 +362,8 @@
             // タイトル
             const title = bookData.summary.title || 'タイトル不明';
             // Amazonリンク
-            const amazonUrl = bookData.url || `https://www.amazon.co.jp/dp/${bookData.inputCode}`;
+            const inputCode = bookData.inputCode || bookData.summary.isbn || '';
+            const amazonUrl = bookData.url || `https://www.amazon.co.jp/dp/${inputCode}`;
 
             bookItem.href = amazonUrl;
             bookItem.target = '_blank';
@@ -368,8 +372,8 @@
             bookItem.style.width = `${calculateWidth(title)}px`;
 
             bookItem.innerHTML = `
-                <h3>${title}</h3>
-            `;
+        <h3>${title}</h3>
+    `;
 
             // ミドルクリックで削除
             bookItem.addEventListener('auxclick', (e) => {
